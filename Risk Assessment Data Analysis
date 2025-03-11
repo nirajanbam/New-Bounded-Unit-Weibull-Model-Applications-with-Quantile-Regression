@@ -1,0 +1,93 @@
+library(unitquantreg)
+dir()
+Risk<-read.csv("RiskSurvey.csv")
+FIRMCOST<-Risk$FIRMCOST/100
+ASSUME<-Risk$ASSUME
+CAP<-Risk$CAP
+SIZELOG<-Risk$SIZELOG
+INDCOST<-Risk$INDCOST
+CENTRAL<-Risk$CENTRAL
+SOPH<-Risk$SOPH
+X <- model.matrix(~ASSUME+CAP+SIZELOG+INDCOST+CENTRAL+SOPH)
+y<-FIRMCOST
+n <- length(y)
+###Visuals##
+boxplot(FIRMCOST)
+boxplot(FIRMCOST, horizontal = TRUE, col = "orange")  # Plot boxplot horizontally with custom colordev.off()  # Close the PNG device
+
+###Unit Weibull##
+fit_UW <- unitquantreg(formula = FIRMCOST~ASSUME+CAP+SIZELOG+INDCOST+CENTRAL+SOPH,
+                       family = "uweibull",
+                       tau = 0.5, link.theta = "log")
+summary(fit_UW)
+AIC(fit_UW)
+BIC(fit_UW)
+rsUWQ<-residuals(fit_UW , type = c("quantile"))
+rsUWC<-residuals(fit_UW , type = c("cox-snell"))
+
+ks.test(rsUWQ, "pnorm")
+
+##Kumaraswamy##
+
+fit_KS <- unitquantreg(formula = FIRMCOST~ASSUME+CAP+SIZELOG+INDCOST+CENTRAL+SOPH,
+                       family = "kumaraswamy",
+                       tau = 0.5, link.theta = "log")
+summary(fit_KS)
+AIC(fit_KS)
+BIC(fit_KS)
+
+rsKQ<-residuals(fit_KS , type = c("quantile"))
+ks.test(rsKQ, "pnorm")
+###Beta REgression###
+library(betareg)
+beta2 <- betareg(FIRMCOST~ASSUME+CAP+SIZELOG+INDCOST+CENTRAL+SOPH)
+summary(beta2)
+AIC(beta2)
+BIC(beta2)
+
+quantile_residuals <-residuals(beta2, type = "quantile")
+
+
+####New Unit Weibull####
+# Maximize the log-likelihood function using maxLik###
+n <- length(y)
+### Guess ####
+t =  log(y/(1-y))  #response variable for MQO as initial guess 
+beta_guess = round(as.numeric(lm(t~X[,-1])$coe),2)  #fitted linear regression
+c_guess = 1.0  #guess for shape parameter
+guess=c(c_guess, beta_guess)
+mle_result <- maxLik(log_likelihood, start = guess, method = "BFGS")
+summary(mle_result)
+AIC(mle_result)
+AIC(mle_result)
+### AIC ####
+aic_NUW <- -2 * 119.846  + 2 * 8
+# Calculate BIC##
+bic_NUW <- -2 * 119.846 + 8 * log(n)
+mle_result$hessian
+mle_result$estimate
+mle_result$gradient
+# Extract estimated parameters
+beta_hat <- exp(coef(mle_result)[1])
+delta_hat <- coef(mle_result)[-1]
+
+# Compute mu_hat
+mu_hat <- exp(X %*% delta_hat) / (1 + exp(X %*% delta_hat))
+
+# Compute G(y; beta, mu)
+q<-0.5
+G <- exp(((1 / mu_hat - 1)^(-beta_hat)) * log(q) * ((1 - y) / y)^ beta_hat)
+
+# Compute r_hat
+r_hat <- qnorm(G)
+
+# Remove NaN, Inf, and -Inf values from r_hat
+r_hat_finite <- r_hat[is.finite(r_hat)]
+ks.test(r_hat_finite, "pnorm")
+par(mfrow = c(2, 2))
+plot1<-hnp(r_hat_finite, sim = 100,halfnormal = T, ylab="Quantile residuals", main="New Bounded unit-Weibull")
+plot2<-hnp(rsKQ, sim = 100,halfnormal = T, ylab="Quantile residuals", main="Kumaraswamy")
+plot3<-hnp(rsUWQ, sim = 100,halfnormal = T, ylab="Quantile residuals", main="Unit Weibull")
+plot4<-hnp(quantile_residuals , sim = 100,halfnormal = T, ylab="Quantile residuals", main="Beta")
+
+dev.off()
