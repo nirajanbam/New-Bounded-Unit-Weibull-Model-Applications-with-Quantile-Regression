@@ -1,0 +1,137 @@
+##Education Attainment Data Analysis##
+
+library(simplexreg)
+library(maxLik)
+library(MASS)
+# Load data
+# Load readxl package
+library(readxl)
+# Define the log-likelihood function
+log_likelihood <- function(params) {
+  beta <- exp(params[1])
+  delta <- params[-1]
+  q <- 0.5
+  mu <- exp(X %*% delta) / (1 + exp(X %*% delta))
+  term1 <- n * log(beta) + sum(log(-(1/mu - 1)^(-beta) * log(q)))
+  term2 <- (beta - 1) * sum(log((1 - y) / y))
+  term3 <- -2 * sum(log(y))
+  term4 <- sum((1/mu - 1)^(-beta) * log(q) * ((1 - y) / y)^beta)
+  log_lik <- term1 + term2 + term3 + term4
+  return(log_lik)  
+}
+
+Educ <-read.csv("Educational Attainment Data.csv")
+y <- Educ$Education/100
+length(y)
+Homicide<-Educ$Homicide_rate
+Satisfaction<-Educ$Life_satisfaction
+plot(density(Homicide))
+plot(density(Satisfaction))
+X <- model.matrix(~Satisfaction+Homicide)
+n <- length(y)
+str(Educ)
+boxplot(y, horizontal = TRUE, col = "orange", xlab = "Student Attainment Proportion")  
+
+###New Unit Wibull###
+# Maximize the log-likelihood function using maxLik###
+n <- length(y)
+### Guess ####
+t =  log(y/(1-y))  #response variable for MQO as initial guess 
+beta_guess = as.numeric(lm(t~X[,-1])$coe)  #fitted linear regression
+c_guess = 1.0  #guess for shape parameter
+guess = c(c_guess,beta_guess)
+mle_result <- maxLik(log_likelihood, start = guess, method = "BFGS")
+summary(mle_result)
+AIC(mle_result)
+### AIC ####
+aic_NUW <- -2 * 69.96001  + 2 * 5
+# Calculate BIC##
+bic_NUW <- -2 * 69.96001 + 4 * log(n)
+
+mle_result1$hessian
+mle_result1$estimate
+mle_result1$gradient
+
+# Extract estimated parameters
+beta_hat <- exp(coef(mle_result1)[1])
+delta_hat <- coef(mle_result1)[-1]
+
+# Compute mu_hat
+mu_hat <- exp(X %*% delta_hat) / (1 + exp(X %*% delta_hat))
+
+# Compute G(y; beta, mu)
+q<-0.5
+G <- exp(((1 / mu_hat - 1)^(-beta_hat)) * log(q) * ((1 - y) / y)^ beta_hat)
+
+# Compute r_hat
+r_hat <- qnorm(G)
+
+# Remove NaN, Inf, and -Inf values from r_hat
+r_hat_finite <- r_hat[is.finite(r_hat)]
+
+####Other Competing Distributions ##
+##Kumaraswamy##
+fit_1 <- unitquantreg(formula = y~Satisfaction +Homicide,
+                      family = "kum",
+                      tau = 0.5, link.theta = "log")
+AIC(fit_1)
+BIC(fit_1)
+sum1<-summary(fit_1)
+rs1<-residuals(fit_1, type = c("quantile"))
+class(rs1)
+ks.test(rs1, "pnorm")
+library(unitquantreg)
+##Unit Weibull##
+fit_2 <- unitquantreg(formula = y~Satisfaction +Homicide,
+                      family = "unitweibull",
+                      tau = 0.5, link.theta = "log")
+
+AIC(fit_2)
+BIC(fit_2)
+sum2<-summary(fit_2)
+rsuw<-residuals(fit_2, type = c("quantile"))
+ks.test(rsuw, "pnorm")
+
+##Unit BurrXII##
+
+fit_3 <- unitquantreg(formula = y~Satisfaction +Homicide,
+                      family = "unitburrxii",
+                      tau = 0.5, link.theta = "log")
+AIC(fit_3)
+BIC(fit_3)
+
+###Unit Logistic###
+
+fit_ulg <- unitquantreg(formula = y~Satisfaction +Homicide,
+                        family = "unitlogistic",
+                        tau = 0.5, link.theta = "log")
+AIC(fit_ulg)
+BIC(fit_ulg)
+
+###Unit Johnson###
+fit_john <- unitquantreg(formula = y~Satisfaction +Homicide,
+                         family = "johnsonsb",
+                         tau = 0.5, link.theta = "log")
+AIC(fit_john)
+BIC(fit_john)
+
+
+##Beta Regression##
+library(betareg)
+fit_4<-betareg(y~Satisfaction +Homicide)
+summary(fit_4)
+AIC(fit_4)
+BIC(fit_4)
+Beta_QR<-residuals(fit_4, type = "quantile")
+ks.test(Beta_QR, "pnorm")
+######## Quantile Plot#####
+par(mfrow = c(2, 2))
+plot1<-qqPlot(rs1,  ylab="Quantile residuals", main="Kumaraswamy")
+plot4<-qqPlot(Beta_QR, ylab="Quantile residuals", main="Beta")
+
+plot2<-qqPlot(rsuw, ylab="Quantile residuals", main="Unit Weibull")
+
+plot3<-qqPlot(r_hat_finite,ylab="Quantile residuals", main="New Bounded unit-Weibull")
+
+
+dev.off()
