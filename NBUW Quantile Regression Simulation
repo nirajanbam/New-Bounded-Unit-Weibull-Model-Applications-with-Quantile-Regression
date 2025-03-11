@@ -1,0 +1,102 @@
+rm(list = ls())
+##########################     FIXED QUANTITIES     ################################
+set.seed(2020)
+R = 10000 #number of repplications
+q = 0.5 #known for other quantiles change value of q 
+beta_true = c(1.3, 1.4)  #regression parameters
+B = 2 #shape parameter
+####################################################################################
+par_true = c(beta_true,B)
+beta1 = beta_true[1]
+beta2 = beta_true[2]
+
+#############  Quantile function of NBUW   ####################
+r_NBW <- function(n) {
+  u <- runif(n)  # Generate random numbers from a uniform distribution
+  samples <- ((log(u) / log(q) * (1 / mu - 1)^B)^(1 / B) + 1)^(-1)  # Inverse of the quantile function
+  return(samples)
+} ## B is shape parameter
+
+###Logit function###
+lfunc <- function(beta,x2){  
+  b1 <- beta[1]
+  b2 <- beta[2]
+  mu_logit_link <- 1/(1+exp(-(b1+b2*x2)))
+  return(mu_logit_link)    
+}
+###Log likelihood function of NBUW####
+log_likelihod <- function(par) {
+  beta1 <- par[1]
+  beta2 <-par[2]
+  B <- exp(par[3])
+  mu <- lfunc(c(beta1,beta2),x2) 
+  term1 <- n * log(B) + sum(log(-(1/mu - 1)^(-B) * log(q)))
+  term2 <- (B - 1) * sum(log((1 - y) / y))
+  term3 <- -2 * sum(log(y))
+  term4 <- sum((1/mu - 1)^(-B) * log(q) * ((1 - y) / y)^B)
+  ell <- term1 + term2 + term3 + term4
+  return(ell)  
+}
+####Idea of following simulation pattern is borrowed from
+#Ribeiro TF, Peña-Ramírez FA, Guerra RR, Cordeiro GM (2022) 
+#Another unit Burr XII quantile regression model based on the different 
+#reparameterization applied to dropout in Brazilian undergraduate courses. 
+#PLOS ONE 17(11): e0276695. https://doi.org/10.1371/journal.pone.0276695
+################################################################################
+####Simulation###
+k = 1              
+vecn = c(25,75,150,300)   #sample sizes vector
+res_mat = matrix(NA,length(vecn),10) 
+
+###########################    ARRAY BOXPLOT   #################################
+arr_boxplot = array(NA, c(R,3,length(vecn)))
+colnames(arr_boxplot) <- c("hat_beta1","hat_beta2","hat_c")
+################################################################################
+
+for (n in vecn) {##Loop for sample size
+
+  x2 = rnorm(n) 
+  mu = lfunc(c(beta1,beta2),x2) 
+  yr <- r_NBW(n) 
+  
+  z =  log(yr/(1-yr))
+  
+  ##Initial guess 
+  beta_guess = lm(z~x2)  #fitted linear regression (simple in this case)
+  beta1_guess <- as.numeric(beta_guess$coefficients[1]) #guess for beta1
+  beta2_guess <- as.numeric(beta_guess$coefficients[2]) #guess for beta2
+  c_guess = 1.0  #guess for shape parameter
+  guess = c(beta1_guess,beta2_guess,c_guess)
+
+  
+  ##MC simulation
+  bug = 0  
+  i = 1  
+  estim = matrix(NA,R,3)  #matrix for to salve the MLEs
+  while (i <= R) { 
+    y <- r_NBW(n)  
+    res <- try(optim(guess,log_likelihod,# grr_analytic,-->> to use after checking der. in matrix not.
+                     method = "BFGS",
+                     control = list(maxit = 100, reltol = 1e-38,
+                                    fnscale = -1)),
+               silent = T)
+    if(class(res)=="try-error" || res$conv != 0)
+    {
+      bug <- bug+1  
+    }else{
+      estim[i,] <- res$par     
+      arr_boxplot[i,,k] <- res$par 
+      i <- i+1  #it is update the repplication
+    }
+  }
+  mean_MLEs <- apply(estim, 2, mean)   
+  mean_MLEs[3] <- exp(mean_MLEs[3])                                
+  RB <- (mean_MLEs-par_true)/par_true*100 
+  RMSE <- sqrt(apply(estim[,],2,var)+(mean_MLEs-par_true)^2)  
+  colnames(res_mat) <- c("beta_1","beta_2","c","n","RB_b1","RB_b2", "RB_c",
+                         "RMSE_b1","RMSE_b2","RMSE_c")
+  res_mat[k,] <- c(par_true,n,RB,RMSE)
+  print(k)  
+  k = k+1  
+} 
+res_mat
